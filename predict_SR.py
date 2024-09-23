@@ -77,7 +77,7 @@ def predict(model,data,patch_size):
     #print ('number of cpus changed to ',torch.get_num_threads())
     #take only patches that are not empty
     non_zero_indices = np.where(np.sum(data, axis=(1,2,3)) != 0)[0]
-    batch_size = 1
+    batch_size = 32
     loop_len = data[non_zero_indices].shape[0]//batch_size
     for i in range(0,loop_len+1):
         
@@ -127,22 +127,25 @@ def Super_resolution(data,model):
 
 def data_spliting (data,model):
     print ('shape of data before spliting', data.shape)
-    scale = 2.0
-    output = np.zeros_like(ndimage.zoom(data[:1,:,:],scale, order = 1, prefilter=False, grid_mode=False))
-    step = 64
+    scale = 2
+    overlap = 10
+    step = 40
+    output_shape = data[:overlap,:,:].shape 
+    output_shape = (output_shape.shape[0]*scale,output_shape.shape[1]*scale,output_shape.shape[2]*scale )
+    output = np.zeros(output_shape)
 
-    for s in range (0,data.shape[0],step):
-        print ('steps = ',s,s+step)
+    for s in range (overlap,data.shape[0],step):
+        print ('steps = ',s-overlap,s+step-overlap)
         if s+step > data.shape[0]:
-            img = data[s:,:,:]
+            img = data[s-overlap:,:,:]
         else:
-            img = data[s:s+step,:,:]
+            img = data[s-overlap:s+step+overlap,:,:]
             
         img = ndimage.zoom(img,scale, order = 1, prefilter=False, grid_mode=False)
+        sr_out = Super_resolution(img,model) [int(scale*overlap):int(scale*(-overlap)),:,:]
+        output = np.concatenate((output, sr_out ), axis=0) 
         
-        output = np.concatenate((output, Super_resolution(img,model)), axis=0) 
-        
-    return output[2:] #dropping the added zero layers from output
+    return output 
 
 
 
@@ -201,6 +204,9 @@ def get_ice_part(image, thresh1, thresh2, thickness):
         final_mask[outlier_index] = final_mask[closest_good_index]
     return final_mask
     
+   
+    
+
     
 if __name__ == "__main__":
     import numpy as np
@@ -213,6 +219,7 @@ if __name__ == "__main__":
     import torch.nn as nn
     import time
     import cv2 
+    from rek_read import read_rek_file
     
     if torch.cuda.is_available():
         device_count = torch.cuda.device_count()
@@ -227,45 +234,54 @@ if __name__ == "__main__":
     
 
     import SRResnet
-    model = SRResnet.SRResNet(4,64)
-    load_checkpoint(torch.load("my_SRResnet_4_checkpoint.pth.tar",map_location=torch.device(device) ), model)
-   
-   
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    n_chanels = 32
+    num_residual_blocks = 8
+    model = SRResnet.SRResNet(num_blocks = num_residual_blocks, n_chanels = n_chanels)
+    model.to(device)
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
+        
+    load_checkpoint(torch.load("my_SRResnet_RS8_NC32_checkpoint.pth.tar",map_location=torch.device(device) ), model)
     
-    model.to(device)
     
     
-    #paths = glob.glob('data/*')
-    #print(paths)
-    paths = [ 'data/B40_Bag12_13_hxfb101ms_block_0.tif']
+    paths = glob.glob('../B40data/B40recfiles/*.rek')
+    print(paths)
+    print ('number of files =' ,len(paths))
 
-    slices = [(200,250),(4,-4),(4,-4)]
-    
-    for i, f in enumerate(paths):
+
+    #slices = [(0,-1)] # how much of data goes for super resolution (0,-1) = all data
+    slices = [(1,-1)]
+    for i, f in enumerate(paths[0:3]):
         t1 = time.time()
-        data = tifffile.imread(f)[slices[i][0]:slices[i][1]]
+        data = read_rek_file(f)[slices[0][0]:slices[0][1]]
+        #data = tifffile.imread(f)[slices[0][0]:slices[0][1]]
         data = contrast_stretching_full(data)
         mask = get_ice_part(data, 10, 20, 26) #Thickness = 26 was changed
         # use this mask if needed to filter ice parts before SR operation
         data = data *mask
-        name = f[6:-4]
+        name = f.split('/')[-1].split('.')[0]
         print ('*********************************************')
         print ('file name = ', name)
         print ('low res shape = ',data.shape)
         
-        output = data_spliting(data, model)
-       
-        tifffile.imwrite('../B40_SR_gray/'+name+'_SRResnet_.tif', output)
+        output = data_spliting(data, model).astype('uint8')
+        
+        metadata = {
+        'axes': 'ZYX',  # Adjust according to your image axes, could be 'XY', 'XYZ', 'ZYX', etc.
+        'spacing': 1.0,  # Pixel size along Z-axis (modify as needed)
+        'unit': 'um',    # Units, e.g., 'micrometer' or 'nm'
+        'description': '3D image data with proper metadata for ImageJ'}
+        
+        
+        tifffile.imwrite('../B40_SR_gray/'+name+'_SRResnet_.tif', output,
+                         photometric='minisblack',metadata=metadata,imagej=True)
         
     
         t2= time.time()
         print ('Time (h) =', round((t2-t1)/3600))
-    
+        
     
     
     
