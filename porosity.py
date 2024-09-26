@@ -2,24 +2,25 @@ import glob
 import tifffile
 import cv2
 import numpy as np
-
-
+from multiprocessing import Pool
+import math
 
 class ice():
     
     def __init__(self,img, name, starting_layer,ending_layer):
         self.img = img
-        core_name = file_name[:3]
-        print (core_name)
+        self.name = name
+        self.core_name = self.name[:3]
+        print (self.core_name)
         self.sorting_depth = int(name.split('Bag')[-1].split('_')[0])
         self.starting_layer = starting_layer
         self.ending_layer = ending_layer
-        if core_name == 'B45':
+        if self.core_name == 'B45':
             self.single_core_depth = name.split('Bag')[-1].split('_')[0]
             self.left_depth = None
             self.right_depth = None
             
-        elif core_name == 'B40':
+        elif self.core_name == 'B40':
             self.left_depth = int(name.split('Bag')[-1].split('_')[0])
             self.right_depth = int(name.split('Bag')[-1].split('_')[1])
             self.single_core_depth = None
@@ -134,7 +135,9 @@ class ice():
 
 
 
-def worker(img_chunk, file_name,starting_layer, ending_layer):
+def worker(aninput):
+    img_chunk, file_name,starting_layer, ending_layer = aninput
+    results = []
     ice_1 = ice(img_chunk, file_name,starting_layer, ending_layer)
     ice_1.porosity_double_ice()
     print ('left_porosity',ice_1.left_porosity)
@@ -142,32 +145,71 @@ def worker(img_chunk, file_name,starting_layer, ending_layer):
         
     print ('right_porosity',ice_1.right_porosity)
     print ('right_volume', ice_1.right_vol)
-    
-    return
+    results.append((
+        ice_1.name,
+        ice_1.number_of_regions,
+        ice_1.starting_layer,
+        ice_1.ending_layer,
+        ice_1.left_depth,
+        ice_1.left_vol,
+        ice_1.left_porosity
+        ))
+    results.append((
+        ice_1.name,
+        ice_1.number_of_regions,
+        ice_1.starting_layer,
+        ice_1.ending_layer,
+        ice_1.right_depth,
+        ice_1.right_vol,
+        ice_1.right_porosity
+        ))
+    return results
 
 
-
-
-        
-files = glob.glob('../B40_SR_seg/*.tif')
-print (files)
-print ('***************************')
-for f in files:
-    step = 10
-    file_name = f.split('/')[-1].split('\\')[-1].split('.tif')[0]
-    img = tifffile.imread(f)
-    for i in range(0,img.shape[0],step):
+def chunk_data(data,file_name,step ):
+    # Function to split the input data into chunks
+    # Split data into chunks of chunk_size
+    for i in range(0,data.shape[0],step):
         starting_layer = i
         ending_layer = i+step
-        
-        if i+step >= img.shape[0]:
-            ending_layer = -1
             
-        img_chunk = img[starting_layer:ending_layer]
-        w = worker(img_chunk, file_name,starting_layer, ending_layer)
+        if i+step >= data.shape[0]:
+            ending_layer = -1
 
+        yield [data[starting_layer:ending_layer],file_name,starting_layer,ending_layer]
+
+
+# Main function to process input using multiprocessing
+def process_data(data,file_name,step, num_workers):
+
+    # Split the input data into chunks
+    chunks = list(chunk_data(data,file_name,step))
+
+    with Pool(processes=num_workers) as pool:
+        # Use pool.map to send each chunk to a worker
+        chunk_results = pool.map(worker, chunks)
+    
+    # Flatten the list of lists into a single list of results
+    #results = [item for sublist in chunk_results for item in sublist]
+    
+    return chunk_results
+
+ 
+
+if __name__ == "__main__":
+    num_workers = 4  # Number of workers you want to use
+    step = 10
+    files = glob.glob('../B40_SR_seg/*.tif')
+    print (files)
+    print ('***************************')
+    for f in files:
+        
+        file_name = f.split('/')[-1].split('\\')[-1].split('.tif')[0]
+        data = tifffile.imread(f)[:50]
+        
+        result_list = process_data(data,file_name,step, num_workers)
+        print (result_list)
         break
-
     
     
     
