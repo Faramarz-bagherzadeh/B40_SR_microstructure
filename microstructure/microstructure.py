@@ -11,6 +11,7 @@ import pumapy as puma
 import microstructure_parameters as mp
 import openpnm as op
 import porespy as ps
+from openporosity import classify_pores
 
 class ice():
     def __init__(self,img, name, starting_layer,ending_layer,sample_size):
@@ -87,7 +88,7 @@ class ice():
 
 
 
-
+    
     def separate_cores(self):
 
         """
@@ -175,27 +176,30 @@ class ice():
         return mil
 
 
-    def puma_permeability (self,img,snow):
-        try:
+    def puma_permeability (self,img):
+        k=[]
+        inputs = [(img, self.resolution,'zmin','zmax'),(img, self.resolution,'ymin','ymax'),(img, self.resolution,'xmin','xmax')]
+        for inp in inputs:
+            try:
             # Permeability of X and Z are replaced because diffrence between numpy and porspy indexing
-            kx = mp.calculate_permeability(img,snow, self.resolution,'zmin','zmax')
-            ky = mp.calculate_permeability(img,snow, self.resolution,'ymin','ymax')
-            kz = mp.calculate_permeability(img,snow, self.resolution,'xmin','xmax')
-        except:
-            return (-100,-100,-100)
-
-        return (kx,ky,kz)
+                result = mp.calculate_permeability(*inp)
+                k.append(result)
+            except:
+                k.append(-100)
+        return k
 
 
-    def puma_tortuosity (self,img, snow):
-        try:
-            tau_x = mp.calculate_tortuosity(img,snow, self.resolution,'zmin','zmax')
-            tau_y = mp.calculate_tortuosity(img,snow, self.resolution,'ymin','ymax')
-            tau_z = mp.calculate_tortuosity(img,snow, self.resolution,'xmin','xmax')
-        except:
-            return(-100,-100,-100)
-
-        return (tau_x,tau_y,tau_z)
+    def puma_tortuosity (self,img):
+        tau=[]
+        inputs = [(img, self.resolution,'zmin','zmax'),(img, self.resolution,'ymin','ymax'),(img, self.resolution,'xmin','xmax')]
+        for inp in inputs:
+            try:
+                result = mp.calculate_tortuosity(*inp)
+                tau.append(result)
+            except:
+                tau.append(-100)
+        print ('***  Tau = ',tau)
+        return tau
 
 
     def microstructure_single(self):
@@ -212,15 +216,16 @@ class ice():
         #To make the network should make the image to bool
         #The pore space (void) should be True to allow flow going through it
         bool_img = self.single_sample==0
-        self.single_sample_network=ps.networks.snow2(bool_img, sigma=0, r_max=2, voxel_size=self.resolution)
+        
         if self.single_sample is not None:
             self.single_vol =  self.single_sample.size
             self.single_porosity = round(len(self.single_sample[self.single_sample==0])*100/(self.single_vol+1),2)
+            self.single_pores = classify_pores(self.single_sample)
             self.single_euler = round(measure.euler_number(self.single_sample, connectivity=1)/self.volume_cm,2)
             self.single_SSA = self.puma_specific_area(self.single_sample)
             self.single_MIL= self.puma_mean_intercept_length(self.single_sample)
-            self.single_Perm = self.puma_permeability(self.single_sample,self.single_sample_network)
-            self.single_Tort = self.puma_tortuosity(self.single_sample,self.single_sample_network)
+            self.single_Perm = self.puma_permeability(bool_img)
+            self.single_Tort = self.puma_tortuosity(bool_img)
 
     def microstructure_double_ice (self):
         from skimage import measure
@@ -235,46 +240,52 @@ class ice():
 
         self.left_sample = self.set_sample_volume(self.mask, side=1)
         bool_img =self.left_sample==0
-        self.left_sample_network=ps.networks.snow2(bool_img, sigma=0, r_max=2, voxel_size=self.resolution)
+        
+        #self.left_sample_network=ps.networks.snow2(bool_img, sigma=0.4, r_max=4, voxel_size=self.resolution,accuracy='high')
        # tifffile.imwrite('samples/left.tif',self.left_sample)
         if self.left_sample is not None:
             self.left_vol =  self.left_sample.size
             self.left_porosity = round(len(self.left_sample[self.left_sample==0])*100/(self.left_vol+1),2)
+            self.left_pores = classify_pores(self.left_sample)
             self.left_euler = round(measure.euler_number(self.left_sample, connectivity=1)/self.volume_cm ,2)
             self.left_SSA = self.puma_specific_area(self.left_sample)
             self.left_MIL= self.puma_mean_intercept_length(self.left_sample)
-            self.left_Perm = self.puma_permeability(self.left_sample,self.left_sample_network)
-            self.left_Tort = self.puma_tortuosity(self.left_sample,self.left_sample_network)
+            self.left_Perm = self.puma_permeability(bool_img)
+            self.left_Tort = self.puma_tortuosity(bool_img)
 
 
         self.right_sample = self.set_sample_volume(self.mask, side=2)
         bool_img =self.right_sample==0
-        self.right_sample_network=ps.networks.snow2(bool_img, sigma=0, r_max=2, voxel_size=self.resolution)
+        
+        #self.right_sample_network=ps.networks.snow2(bool_img, sigma=0.4, r_max=4, voxel_size=self.resolution,accuracy='high')
        # tifffile.imwrite('samples/right.tif',self.right_sample)
         if self.right_sample is not None:
             self.right_vol =  self.right_sample.size
             self.right_porosity = round(len(self.right_sample[self.right_sample==0])*100/(self.right_vol+1),2)
+            self.right_pores = classify_pores(self.right_sample)
             self.right_euler = round(measure.euler_number(self.right_sample, connectivity=1)/self.volume_cm ,2)
             self.right_SSA = self.puma_specific_area(self.right_sample)
             self.right_MIL= self.puma_mean_intercept_length(self.right_sample)
-            self.right_Perm = self.puma_permeability(self.right_sample,self.right_sample_network)
-            self.right_Tort = self.puma_tortuosity(self.right_sample,self.right_sample_network)
+            self.right_Perm = self.puma_permeability(bool_img)
+            self.right_Tort = self.puma_tortuosity(bool_img)
 
 def worker(aninput):
     img_chunk, file_name,starting_layer, ending_layer,sample_size = aninput
     results = []
     ice_1 = ice(img_chunk, file_name,starting_layer, ending_layer,sample_size)
 
-   # print ('worker started')
+    print ('worker started')
     if ice_1.single_core_depth == None:
         try:
+            print ('Double core image activated')
             ice_1.microstructure_double_ice()
         except:
+            print ('****************  AN ERROR in Double Microstrutcture Happened ************')
             return None
 
         #print ('left_porosity',ice_1.left_porosity)
         #print ('left_volume', ice_1.left_vol)
-        print ('Double core image activated')
+
         if ice_1.left_sample is not None:
             results.append((
                 ice_1.name,
@@ -284,6 +295,9 @@ def worker(aninput):
                 ice_1.left_depth,
                 ice_1.left_vol,
                 ice_1.left_porosity,
+                ice_1.left_pores[0],
+                ice_1.left_pores[1],
+                ice_1.left_pores[2],
                 ice_1.left_euler,
                 ice_1.left_SSA,
                 ice_1.left_MIL[0],
@@ -307,6 +321,9 @@ def worker(aninput):
                 ice_1.right_depth,
                 ice_1.right_vol,
                 ice_1.right_porosity,
+                ice_1.right_pores[0],
+                ice_1.right_pores[1],
+                ice_1.right_pores[2],
                 ice_1.right_euler,
                 ice_1.right_SSA,
                 ice_1.right_MIL[0],
@@ -318,6 +335,8 @@ def worker(aninput):
                 ice_1.right_Tort[0],
                 ice_1.right_Tort[1],
                 ice_1.right_Tort[2],))
+            print('Right side attached!!1')
+        return results
     else:
         try:
             ice_1.microstructure_single()
@@ -333,6 +352,9 @@ def worker(aninput):
                 ice_1.single_core_depth,
                 ice_1.single_vol,
                 ice_1.single_porosity,
+                ice_1.single_pores[0],
+                ice_1.single_pores[1],
+                ice_1.single_pores[2],
                 ice_1.single_euler,
                 ice_1.single_SSA,
                 ice_1.single_MIL[0],
@@ -373,8 +395,8 @@ def process_data(file_name,step, num_workers,sample_size):
     print ('shape of image per chunk: ', chunks[0][0].shape)
     with Pool(processes=num_workers) as pool:
         # Use pool.map to send each chunk to a worker
-        #chunk_results = pool.map(worker, chunks)
-        chunk_results = [result for result in pool.map(worker, chunks) if result is not None]
+        pool_results = pool.map(worker, chunks)
+        chunk_results = [result for result in pool_results if result is not None]
 
     return chunk_results
 
@@ -389,7 +411,7 @@ if __name__ == "__main__":
     num_cores = multiprocessing.cpu_count()
     print ('number of cpus = ', num_cores)
     import time
-    num_workers = 30  # Number of workers you want to use
+    num_workers = 20  # Number of workers you want to use
     sample_size = 400
     overlap = 200
     step_size = sample_size - overlap
@@ -401,7 +423,7 @@ if __name__ == "__main__":
     print ('**************************')
     print ('number of files = ', len(files))
     print ('***************************')
-    for f in files[40:45]:
+    for f in files[42:45]:
 
         t1=time.time()
         file_name = f.split('/')[-1].split('\\')[-1].split('.tif')[0]
@@ -411,15 +433,17 @@ if __name__ == "__main__":
 
         result_list = process_data(file_name,step_size, num_workers,sample_size)
        # del data
-        #print (result_list)
+        print (result_list)
         # Flatten the nested list of tuples into a single list
         flattened_data = [item for sublist in result_list for item in sublist]
-       # print(flattened_data)
+        print('HERE is FLAT')
+        print(flattened_data)
         # Create a DataFrame with specified column names
         df = pd.DataFrame(flattened_data, columns=['name', 'number_of_regions',
                                                    'starting_layer', 'ending_layer',
                                                    'depth', 'sample_volume',
-                                                   'porosity','euler_density','SSA',
+                                                   'porosity','open_pores','cuted_pores','isolated_pores',
+                                                   'euler_density','SSA',
                                                    'MIL_x','MIL_y','MIL_z',
                                                    'Perm_x','Perm_y','Perm_z',
                                                    'Tort_x','Tort_y','Tort_z'])
@@ -428,3 +452,5 @@ if __name__ == "__main__":
         print ('Saved ... porosity_{}'.format(file_name))
         t2 = time.time()
         print ('Time (minutes) = ',round((t2-t1)/60))
+        
+        

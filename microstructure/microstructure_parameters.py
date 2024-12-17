@@ -1,14 +1,25 @@
 import numpy as np
 import openpnm as op
 import porespy as ps
+
 np.set_printoptions(precision=4)
 np.random.seed(10)
 
 
 
 
-def calculate_permeability(img, snow, resolution,p1,p2):
-   # snow = ps.networks.snow2(img, voxel_size= resolution)
+def calculate_permeability(img, resolution,p1,p2):
+    filled =ps.filters.fill_blind_pores(img,surface=False)
+    thickness = 2
+    if p1 == 'zmin':
+        filled [:, :, :thickness] = True  # Front face
+    elif p1== 'ymin':
+        filled [:, :thickness, :] = True  # Front face
+    elif p1 == 'xmin' :
+        filled [:thickness, :, :] = True  # Front face
+    else:
+        print ('Cluster Connector plance not found ERROR!!!!')
+    snow = ps.networks.snow2(filled, voxel_size= resolution)
     pn = op.io.network_from_porespy(snow.network)
 
     # Something related to the recent update of the library (ignore it)
@@ -54,8 +65,19 @@ def calculate_permeability(img, snow, resolution,p1,p2):
     return k
 
 
-def calculate_tortuosity(img, snow, resolution,p1,p2):
-    #snow = ps.networks.snow2(img, voxel_size= resolution)
+def calculate_tortuosity(img, resolution,p1,p2):
+    filled =ps.filters.fill_blind_pores(img,surface=False)
+    thickness = 2
+    if p1 == 'zmin':
+        filled [:, :, :thickness] = True  # Front face
+    elif p1== 'ymin':
+        filled [:, :thickness, :] = True  # Front face
+    elif p1 == 'xmin' :
+        filled [:thickness, :, :] = True  # Front face
+    else:
+        print ('Cluster Connector plance not found ERROR!!!!')
+    snow = ps.networks.snow2(filled, voxel_size= resolution)
+    
     pn = op.io.network_from_porespy(snow.network)
 
     # Something related to the recent update of the library (ignore it)
@@ -118,4 +140,3 @@ def calculate_tortuosity(img, snow, resolution,p1,p2):
     tau = compute_tau(pn,p1,p2)
 
     return tau
-
