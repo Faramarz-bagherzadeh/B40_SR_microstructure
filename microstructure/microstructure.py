@@ -21,13 +21,14 @@ class ice():
         self.pixel_volume = (0.006) ** 3
         self.volume_cm = self.sample_size**3 * self.pixel_volume
         self.img = img
-        self.name = name
-        self.core_name = self.name[:3]
+        self.name = name.split('_')[1]
+        self.core_name =name[:3]
         #print (self.core_name)
         self.sorting_depth = int(name.split('Bag')[-1].split('_')[0])
         self.starting_layer = starting_layer
         self.ending_layer = ending_layer
           # cm³
+       # print ('core name = ',self.core_name)
 
         if self.core_name == 'B45':
             self.single_core_depth = name.split('Bag')[-1].split('_')[0]
@@ -76,7 +77,7 @@ class ice():
 
             for cnt in contours:
                 area = cv2.contourArea(cnt)
-                if area > 100:  # Adjust this threshold based on the size of the ice pieces
+                if area > 10:  # Adjust this threshold based on the size of the ice pieces
                     cv2.drawContours(mask, [cnt], -1, 1, thickness=-1)
             kernel_erode = np.ones((kernel_size_erode,kernel_size_erode),np.uint8)
             erosion_mask = cv2.erode(mask,kernel_erode,iterations = 1)
@@ -88,7 +89,7 @@ class ice():
 
 
 
-    
+
     def separate_cores(self):
 
         """
@@ -178,6 +179,7 @@ class ice():
 
     def puma_permeability (self,img):
         k=[]
+        return [0,0,0]
         inputs = [(img, self.resolution,'zmin','zmax'),(img, self.resolution,'ymin','ymax'),(img, self.resolution,'xmin','xmax')]
         for inp in inputs:
             try:
@@ -195,6 +197,7 @@ class ice():
         for inp in inputs:
             try:
                 result = mp.calculate_tortuosity(*inp)
+                #result = 0
                 tau.append(result)
             except:
                 tau.append(-100)
@@ -208,7 +211,7 @@ class ice():
         if self.sorting_depth >= 20:
             self.kernel_size_dilute = 2
         else:
-            self.kernel_size_dilute = 20
+            self.kernel_size_dilute = 2 #20
 
         self.mask = self.get_ice_part()
 
@@ -216,7 +219,7 @@ class ice():
         #To make the network should make the image to bool
         #The pore space (void) should be True to allow flow going through it
         bool_img = self.single_sample==0
-        
+
         if self.single_sample is not None:
             self.single_vol =  self.single_sample.size
             self.single_porosity = round(len(self.single_sample[self.single_sample==0])*100/(self.single_vol+1),2)
@@ -226,6 +229,8 @@ class ice():
             self.single_MIL= self.puma_mean_intercept_length(self.single_sample)
             self.single_Perm = self.puma_permeability(bool_img)
             self.single_Tort = self.puma_tortuosity(bool_img)
+            self.single_sph_ice_cluster = mp.spherical_ice_cluster(self.single_sample)
+            self.single_sk = mp.skeleton_metrics(bool_img, self.resolution)
 
     def microstructure_double_ice (self):
         from skimage import measure
@@ -240,7 +245,7 @@ class ice():
 
         self.left_sample = self.set_sample_volume(self.mask, side=1)
         bool_img =self.left_sample==0
-        
+
         #self.left_sample_network=ps.networks.snow2(bool_img, sigma=0.4, r_max=4, voxel_size=self.resolution,accuracy='high')
        # tifffile.imwrite('samples/left.tif',self.left_sample)
         if self.left_sample is not None:
@@ -252,11 +257,13 @@ class ice():
             self.left_MIL= self.puma_mean_intercept_length(self.left_sample)
             self.left_Perm = self.puma_permeability(bool_img)
             self.left_Tort = self.puma_tortuosity(bool_img)
+            self.left_sph_ice_cluster = mp.spherical_ice_cluster(self.left_sample )
+            self.left_sk = mp.skeleton_metrics(bool_img, self.resolution)
 
 
         self.right_sample = self.set_sample_volume(self.mask, side=2)
         bool_img =self.right_sample==0
-        
+
         #self.right_sample_network=ps.networks.snow2(bool_img, sigma=0.4, r_max=4, voxel_size=self.resolution,accuracy='high')
        # tifffile.imwrite('samples/right.tif',self.right_sample)
         if self.right_sample is not None:
@@ -268,6 +275,9 @@ class ice():
             self.right_MIL= self.puma_mean_intercept_length(self.right_sample)
             self.right_Perm = self.puma_permeability(bool_img)
             self.right_Tort = self.puma_tortuosity(bool_img)
+            self.right_sph_ice_cluster = mp.spherical_ice_cluster(self.right_sample)
+            self.right_sk = mp.skeleton_metrics(bool_img, self.resolution)
+
 
 def worker(aninput):
     img_chunk, file_name,starting_layer, ending_layer,sample_size = aninput
@@ -288,6 +298,7 @@ def worker(aninput):
 
         if ice_1.left_sample is not None:
             results.append((
+
                 ice_1.name,
                 ice_1.number_of_regions,
                 ice_1.starting_layer,
@@ -308,7 +319,16 @@ def worker(aninput):
                 ice_1.left_Perm[2],
                 ice_1.left_Tort[0],
                 ice_1.left_Tort[1],
-                ice_1.left_Tort[2],))
+                ice_1.left_Tort[2],
+                ice_1.left_sph_ice_cluster,
+                ice_1.left_sk['num_pores'],ice_1.left_sk['num_throats'],
+                ice_1.left_sk['coordination_number'],ice_1.left_sk['std_coordination_number'],
+                ice_1.left_sk['avg_pore_volume'],ice_1.left_sk['avg_pore_diameter'],ice_1.left_sk['avg_throat_diameter'],
+                ice_1.left_sk['avg_throat_length'],ice_1.left_sk['max_connections'],ice_1.left_sk['median_connections'],
+                ice_1.left_sk['num_cluster'],ice_1.left_sk['max_cluster_size'],ice_1.left_sk['avg_cluster_size'],
+                ice_1.left_sk['avg_pore_surface_area'],ice_1.left_sk['avg_throat_area']
+
+                ))
 
         #print ('right_porosity',ice_1.right_porosity)
         #print ('right_volume', ice_1.right_vol)
@@ -334,7 +354,15 @@ def worker(aninput):
                 ice_1.right_Perm[2],
                 ice_1.right_Tort[0],
                 ice_1.right_Tort[1],
-                ice_1.right_Tort[2],))
+                ice_1.right_Tort[2],
+                ice_1.right_sph_ice_cluster,
+                ice_1.right_sk['num_pores'],ice_1.right_sk['num_throats'],
+                ice_1.right_sk['coordination_number'],ice_1.right_sk['std_coordination_number'],
+                ice_1.right_sk['avg_pore_volume'],ice_1.right_sk['avg_pore_diameter'],ice_1.right_sk['avg_throat_diameter'],
+                ice_1.right_sk['avg_throat_length'],ice_1.right_sk['max_connections'],ice_1.right_sk['median_connections'],
+                ice_1.right_sk['num_cluster'],ice_1.right_sk['max_cluster_size'],ice_1.right_sk['avg_cluster_size'],
+                ice_1.right_sk['avg_pore_surface_area'],ice_1.right_sk['avg_throat_area']
+                ))
             print('Right side attached!!1')
         return results
     else:
@@ -365,7 +393,15 @@ def worker(aninput):
                 ice_1.single_Perm[2],
                 ice_1.single_Tort[0],
                 ice_1.single_Tort[1],
-                ice_1.single_Tort[2],))
+                ice_1.single_Tort[2],
+                ice_1.single_sph_ice_cluster,
+                ice_1.single_sk['num_pores'],ice_1.single_sk['num_throats'],
+                ice_1.single_sk['coordination_number'],ice_1.single_sk['std_coordination_number'],
+                ice_1.single_sk['avg_pore_volume'],ice_1.single_sk['avg_pore_diameter'],ice_1.single_sk['avg_throat_diameter'],
+                ice_1.single_sk['avg_throat_length'],ice_1.single_sk['max_connections'],ice_1.single_sk['median_connections'],
+                ice_1.single_sk['num_cluster'],ice_1.single_sk['max_cluster_size'],ice_1.single_sk['avg_cluster_size'],
+                ice_1.single_sk['avg_pore_surface_area'],ice_1.single_sk['avg_throat_area']
+                ))
 
     return results
 
@@ -407,11 +443,13 @@ def process_data(file_name,step, num_workers,sample_size):
 
 if __name__ == "__main__":
     import multiprocessing
+    import sys
+    index = int(sys.argv[1])
 
     num_cores = multiprocessing.cpu_count()
     print ('number of cpus = ', num_cores)
     import time
-    num_workers = 20  # Number of workers you want to use
+    num_workers = 10  # Number of workers you want to use
     sample_size = 400
     overlap = 200
     step_size = sample_size - overlap
@@ -419,11 +457,12 @@ if __name__ == "__main__":
     def dir_sorting(e):
         return int(e.split('Bag')[1].split('_')[0])
     files.sort(key=dir_sorting)
-    print (files)
+   # print (files)
     print ('**************************')
     print ('number of files = ', len(files))
     print ('***************************')
-    for f in files[42:45]:
+    #for f in [files[i] for i in range(2,64,2) ]:
+    for f in files[index:index +1]:
 
         t1=time.time()
         file_name = f.split('/')[-1].split('\\')[-1].split('.tif')[0]
@@ -446,11 +485,14 @@ if __name__ == "__main__":
                                                    'euler_density','SSA',
                                                    'MIL_x','MIL_y','MIL_z',
                                                    'Perm_x','Perm_y','Perm_z',
-                                                   'Tort_x','Tort_y','Tort_z'])
+                                                   'Tort_x','Tort_y','Tort_z','sph_ice_cluster',
+                                                   'num_pores','num_throats','coordination_number','std_coordination_number',
+                                                   'avg_pore_volume','avg_pore_diameter','avg_throat_diameter',
+                                                   'avg_throat_length','max_connections','median_connections',
+                                                   'num_cluster','max_cluster_size','avg_cluster_size',
+                                                   'avg_pore_surface_area','avg_throat_area'])
 
-        df.to_excel('output/MP_{}.xlsx'.format(file_name))
+        df.to_excel('output/{}.xlsx'.format(file_name))
         print ('Saved ... porosity_{}'.format(file_name))
         t2 = time.time()
         print ('Time (minutes) = ',round((t2-t1)/60))
-        
-        
